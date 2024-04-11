@@ -41,6 +41,7 @@ use deno_kv::dynamic::MultiBackendDbHandler;
 use deno_tls::RootCertStoreProvider;
 use deno_web::BlobStore;
 use log::debug;
+use deno_fetch::DnsResolver;
 
 use crate::inspector_server::InspectorServer;
 use crate::ops;
@@ -189,6 +190,8 @@ pub struct WorkerOptions {
   pub compiled_wasm_module_store: Option<CompiledWasmModuleStore>,
   pub stdio: Stdio,
   pub feature_checker: Arc<FeatureChecker>,
+  /// Custom DNS resolver to use with the `fetch` API.
+  pub dns_resolver: Option<DnsResolver>,
 }
 
 impl Default for WorkerOptions {
@@ -223,6 +226,7 @@ impl Default for WorkerOptions {
       bootstrap: Default::default(),
       stdio: Default::default(),
       feature_checker: Default::default(),
+      dns_resolver: Default::default(),
     }
   }
 }
@@ -358,6 +362,7 @@ impl MainWorker {
             .unsafely_ignore_certificate_errors
             .clone(),
           file_fetch_handler: Rc::new(deno_fetch::FsFetchHandler),
+          dns_resolver: options.dns_resolver.clone(),
           ..Default::default()
         },
       ),
@@ -394,6 +399,7 @@ impl MainWorker {
               .clone(),
             client_cert_chain_and_key: None,
             proxy: None,
+            dns_resolver: options.dns_resolver.clone(),
           },
         ),
       ),

@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use deno_core::error::type_error;
 use deno_core::error::AnyError;
 use deno_core::OpState;
-use deno_fetch::create_http_client;
+use deno_fetch::{create_http_client, DnsResolver};
 use deno_fetch::CreateHttpClientOptions;
 use deno_tls::rustls::RootCertStore;
 use deno_tls::Proxy;
@@ -27,6 +27,7 @@ pub struct HttpOptions {
   pub proxy: Option<Proxy>,
   pub unsafely_ignore_certificate_errors: Option<Vec<String>>,
   pub client_cert_chain_and_key: Option<(String, String)>,
+  pub dns_resolver: Option<DnsResolver>,
 }
 
 impl HttpOptions {
@@ -139,6 +140,7 @@ impl<P: RemoteDbHandlerPermissions + 'static> DatabaseHandler
         pool_idle_timeout: None,
         http1: false,
         http2: true,
+        dns_resolver: options.dns_resolver.clone(),
       },
     )?;
 
