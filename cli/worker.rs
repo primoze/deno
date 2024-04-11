@@ -654,6 +654,7 @@ impl CliMainWorkerFactory {
       feature_checker,
       skip_op_registration: shared.options.skip_op_registration,
       v8_code_cache: shared.code_cache.clone(),
+      dns_resolver: None,
     };
 
     let mut worker = MainWorker::bootstrap_from_options(
@@ -863,6 +864,7 @@ fn create_web_worker_callback(
       strace_ops: shared.options.strace_ops.clone(),
       close_on_idle: args.close_on_idle,
       maybe_worker_metadata: args.maybe_worker_metadata,
+      dns_resolver: None,
     };
 
     WebWorker::bootstrap_from_options(
