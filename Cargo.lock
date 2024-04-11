@@ -1469,6 +1469,7 @@ dependencies = [
  "deno_tls",
  "dyn-clone",
  "http 1.1.0",
+ "hyper 0.14.28",
  "reqwest",
  "serde",
  "serde_json",

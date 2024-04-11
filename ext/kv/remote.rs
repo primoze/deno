@@ -17,6 +17,7 @@ use deno_core::OpState;
 use deno_fetch::create_http_client;
 use deno_fetch::reqwest;
 use deno_fetch::CreateHttpClientOptions;
+use deno_fetch::DnsResolver;
 use deno_tls::rustls::RootCertStore;
 use deno_tls::Proxy;
 use deno_tls::RootCertStoreProvider;
@@ -34,6 +35,7 @@ pub struct HttpOptions {
   pub proxy: Option<Proxy>,
   pub unsafely_ignore_certificate_errors: Option<Vec<String>>,
   pub client_cert_chain_and_key: TlsKeys,
+  pub dns_resolver: Option<DnsResolver>,
 }
 
 impl HttpOptions {
@@ -199,6 +201,7 @@ impl<P: RemoteDbHandlerPermissions + 'static> DatabaseHandler
         pool_idle_timeout: None,
         http1: false,
         http2: true,
+        dns_resolver: options.dns_resolver.clone(),
       },
     )?;
     let reqwest_client = ReqwestClient(client);

@@ -6,6 +6,7 @@ use std::borrow::Cow;
 use std::cell::RefCell;
 use std::cmp::min;
 use std::convert::From;
+use std::fmt::{Debug, Formatter};
 use std::path::Path;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -70,8 +71,25 @@ use tokio::io::AsyncWriteExt;
 // Re-export reqwest and data_url
 pub use data_url;
 pub use reqwest;
+use reqwest::dns::Resolving;
+use reqwest::dns::{Name, Resolve};
 
 pub use fs_fetch_handler::FsFetchHandler;
+
+#[derive(Clone)]
+pub struct DnsResolver(Arc<dyn Resolve>);
+
+impl DnsResolver {
+  pub fn new(inner: Arc<dyn Resolve>) -> Self {
+    Self(inner)
+  }
+}
+
+impl Debug for DnsResolver {
+  fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    write!(f, "Custom DnsResolver")
+  }
+}
 
 #[derive(Clone)]
 pub struct Options {
@@ -83,6 +101,7 @@ pub struct Options {
   pub unsafely_ignore_certificate_errors: Option<Vec<String>>,
   pub client_cert_chain_and_key: TlsKeys,
   pub file_fetch_handler: Rc<dyn FetchHandler>,
+  pub dns_resolver: Option<DnsResolver>,
 }
 
 impl Options {
@@ -104,6 +123,7 @@ impl Default for Options {
       unsafely_ignore_certificate_errors: None,
       client_cert_chain_and_key: TlsKeys::Null,
       file_fetch_handler: Rc::new(DefaultFileFetchHandler),
+      dns_resolver: None,
     }
   }
 }
@@ -215,6 +235,7 @@ pub fn create_client_from_options(
       pool_idle_timeout: None,
       http1: true,
       http2: true,
+      dns_resolver: options.dns_resolver.clone(),
     },
   )
 }
@@ -884,6 +905,7 @@ where
       ),
       http1: args.http1,
       http2: args.http2,
+      dns_resolver: options.dns_resolver.clone(),
     },
   )?;
 
@@ -904,6 +926,7 @@ pub struct CreateHttpClientOptions {
   pub pool_idle_timeout: Option<Option<u64>>,
   pub http1: bool,
   pub http2: bool,
+  pub dns_resolver: Option<DnsResolver>,
 }
 
 impl Default for CreateHttpClientOptions {
@@ -918,6 +941,7 @@ impl Default for CreateHttpClientOptions {
       pool_idle_timeout: None,
       http1: true,
       http2: true,
+      dns_resolver: None,
     }
   }
 }
@@ -979,6 +1003,10 @@ pub fn create_http_client(
       return Err(type_error("Either `http1` or `http2` needs to be true"))
     }
   }
+  if let Some(dns_resolver) = options.dns_resolver {
+    builder =
+      builder.dns_resolver(Arc::new(ResolverWrapper(dns_resolver.0.clone())));
+  }
 
   builder.build().map_err(|e| e.into())
 }
@@ -989,4 +1017,12 @@ pub fn op_utf8_to_byte_string(
   #[string] input: String,
 ) -> Result<ByteString, AnyError> {
   Ok(input.into())
+}
+
+struct ResolverWrapper(Arc<dyn Resolve>);
+
+impl Resolve for ResolverWrapper {
+  fn resolve(&self, name: Name) -> Resolving {
+    self.0.resolve(name)
+  }
 }

@@ -1,8 +1,10 @@
 // Copyright 2018-2024 the Deno authors. All rights reserved. MIT license.
 
-use crate::auth_tokens::AuthToken;
-use crate::util::progress_bar::UpdateGuard;
-use crate::version::get_user_agent;
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::thread::ThreadId;
+use std::time::Duration;
+use std::time::SystemTime;
 
 use cache_control::Cachability;
 use cache_control::CacheControl;
@@ -13,7 +15,8 @@ use deno_core::error::AnyError;
 use deno_core::futures::StreamExt;
 use deno_core::parking_lot::Mutex;
 use deno_core::url::Url;
-use deno_runtime::deno_fetch::create_http_client;
+use thiserror::Error;
+
 use deno_runtime::deno_fetch::reqwest;
 use deno_runtime::deno_fetch::reqwest::header::HeaderName;
 use deno_runtime::deno_fetch::reqwest::header::HeaderValue;
@@ -23,13 +26,12 @@ use deno_runtime::deno_fetch::reqwest::header::IF_NONE_MATCH;
 use deno_runtime::deno_fetch::reqwest::header::LOCATION;
 use deno_runtime::deno_fetch::reqwest::StatusCode;
 use deno_runtime::deno_fetch::CreateHttpClientOptions;
+use deno_runtime::deno_fetch::{create_http_client, DnsResolver};
 use deno_runtime::deno_tls::RootCertStoreProvider;
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::thread::ThreadId;
-use std::time::Duration;
-use std::time::SystemTime;
-use thiserror::Error;
+
+use crate::auth_tokens::AuthToken;
+use crate::util::progress_bar::UpdateGuard;
+use crate::version::get_user_agent;
 
 // TODO(ry) HTTP headers are not unique key, value pairs. There may be more than
 // one header line with the same key. This should be changed to something like
@@ -210,6 +212,7 @@ pub struct HttpClientProvider {
   // https://github.com/seanmonstar/reqwest/issues/1148#issuecomment-910868788
   #[allow(clippy::disallowed_types)] // reqwest::Client allowed here
   clients_by_thread_id: Mutex<HashMap<ThreadId, reqwest::Client>>,
+  dns_resolver: Option<DnsResolver>,
 }
 
 impl std::fmt::Debug for HttpClientProvider {
@@ -225,6 +228,18 @@ impl HttpClientProvider {
     root_cert_store_provider: Option<Arc<dyn RootCertStoreProvider>>,
     unsafely_ignore_certificate_errors: Option<Vec<String>>,
   ) -> Self {
+    Self::with_dns_resolver(
+      root_cert_store_provider,
+      unsafely_ignore_certificate_errors,
+      None,
+    )
+  }
+
+  pub fn with_dns_resolver(
+    root_cert_store_provider: Option<Arc<dyn RootCertStoreProvider>>,
+    unsafely_ignore_certificate_errors: Option<Vec<String>>,
+    dns_resolver: Option<DnsResolver>,
+  ) -> Self {
     Self {
       options: CreateHttpClientOptions {
         unsafely_ignore_certificate_errors,
@@ -232,6 +247,7 @@ impl HttpClientProvider {
       },
       root_cert_store_provider,
       clients_by_thread_id: Default::default(),
+      dns_resolver,
     }
   }
 
@@ -250,6 +266,7 @@ impl HttpClientProvider {
               Some(provider) => Some(provider.get_or_try_init()?.clone()),
               None => None,
             },
+            dns_resolver: self.dns_resolver.clone(),
             ..self.options.clone()
           },
         )?;
@@ -586,6 +603,9 @@ fn resolve_redirect_from_response(
 mod test {
   use std::collections::HashSet;
   use std::hash::RandomState;
+  use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+
+  use reqwest::dns::{Name, Resolve, Resolving};
 
   use deno_runtime::deno_tls::rustls::RootCertStore;
 
@@ -656,6 +676,19 @@ mod test {
     HttpClient::new(
       create_http_client("test_client", CreateHttpClientOptions::default())
         .unwrap(),
+    )
+  }
+
+  fn create_test_client_with_dns_resolver() -> HttpClient {
+    HttpClient::new(
+      create_http_client(
+        "test_client",
+        CreateHttpClientOptions {
+          dns_resolver: Some(DnsResolver::new(Arc::new(TestResolver))),
+          ..Default::default()
+        },
+      )
+      .unwrap(),
     )
   }
 
@@ -787,6 +820,39 @@ mod test {
     // Relies on external http server. See target/debug/test_server
     let url = Url::parse("http://127.0.0.1:4545/echo_accept").unwrap();
     let client = create_test_client();
+    let result = client
+      .fetch_no_follow(FetchOnceArgs {
+        url,
+        maybe_accept: Some("application/json".to_string()),
+        maybe_etag: None,
+        maybe_auth_token: None,
+        maybe_progress_guard: None,
+      })
+      .await;
+    if let Ok(FetchOnceResult::Code(body, _)) = result {
+      assert_eq!(body, r#"{"accept":"application/json"}"#.as_bytes());
+    } else {
+      panic!();
+    }
+  }
+
+  struct TestResolver;
+
+  impl Resolve for TestResolver {
+    fn resolve(&self, _name: Name) -> Resolving {
+      let iter: Box<dyn Iterator<Item = SocketAddr> + Send> = Box::new(
+        vec![SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0).into()].into_iter(),
+      );
+      Box::pin(async move { Ok(iter) })
+    }
+  }
+
+  #[tokio::test]
+  async fn test_custom_dns_resolver() {
+    let _http_server_guard = test_util::http_server();
+    // Resolves to the test server address on localhost
+    let url = Url::parse("http://google.com:4545/echo_accept").unwrap();
+    let client = create_test_client_with_dns_resolver();
     let result = client
       .fetch_no_follow(FetchOnceArgs {
         url,

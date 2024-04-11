@@ -21,6 +21,7 @@ deno_permissions.workspace = true
 deno_tls.workspace = true
 dyn-clone = "1"
 http.workspace = true
+hyper_v014 = { package = "hyper", version = "0.14.28", features = ["runtime", "http1", "client"] }
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
